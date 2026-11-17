@@ -7,10 +7,15 @@ import type { GitHubErrorCode } from "../github/types";
 export interface ImportRef {
   /** The specifier exactly as written, e.g. "./utils" or "react". */
   specifier: string;
-  /** Repository path the specifier resolves to, or null if unresolved / external. */
+  /** Repository path the specifier resolves to, or null if unresolved or a package. */
   resolved: string | null;
-  /** True for non-relative specifiers (npm packages or path aliases, which aren't resolved yet). */
-  external: boolean;
+  /**
+   * How the specifier was interpreted:
+   * - "relative": ./ or ../ path
+   * - "alias": matched tsconfig `paths` or resolved via `baseUrl`
+   * - "package": anything else (npm packages, workspace packages, unknown aliases)
+   */
+  kind: "relative" | "alias" | "package";
   /** True if every statement using this specifier is type-only (`import type`, `export type`). */
   typeOnly: boolean;
   /** True if at least one statement re-exports from it (`export … from`). */
@@ -30,8 +35,12 @@ export interface AnalysisStats {
   overLimit: number;
   /** Unique file → file edges that resolved inside the repository. */
   internalEdges: number;
-  /** Relative specifiers that didn't resolve to a file in the tree. */
+  /** Relative or alias specifiers that didn't resolve to a file in the tree. */
   unresolved: number;
+  /** Specifiers resolved to a file through tsconfig baseUrl/paths. */
+  aliasResolved: number;
+  /** tsconfig/jsconfig files read (including `extends` and `references` targets). */
+  configFiles: number;
   durationMs: number;
 }
 
@@ -39,6 +48,13 @@ export interface AnalysisLimits {
   maxFiles: number;
   maxFileBytes: number;
   maxTotalBytes: number;
+}
+
+/** A config whose baseUrl/paths were applied, for display. Targets are repository paths. */
+export interface AliasConfigSummary {
+  path: string;
+  baseUrl: string | null;
+  paths: Array<{ pattern: string; targets: string[] }>;
 }
 
 export interface ImportAnalysis {
@@ -56,6 +72,8 @@ export interface ImportAnalysis {
    */
   skipped: Record<string, SkipReason>;
   stats: AnalysisStats;
+  /** Configs that define path aliases or baseUrl for at least one analyzed file. */
+  aliasConfigs: AliasConfigSummary[];
   limits: AnalysisLimits;
   /** The GitHub tree was truncated, so some files (and import targets) may be missing. */
   treeTruncated: boolean;

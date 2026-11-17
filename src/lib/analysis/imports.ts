@@ -1,15 +1,13 @@
 /**
- * Pure static import analysis: parsing with the TypeScript compiler API,
- * relative path resolution, and building the import / imported-by index.
+ * Pure static import analysis: parsing with the TypeScript compiler API and
+ * building the import / imported-by index. Module resolution is injected
+ * (see tsconfig.ts), so this file only deals with syntax and bookkeeping.
  *
  * No network or framework code here, so it can be unit tested with plain Node.
  */
 import ts from "typescript";
+import type { ModuleResolver } from "./tsconfig.ts";
 import type { ImportRef } from "./types";
-
-export function isRelativeSpecifier(spec: string): boolean {
-  return spec === "." || spec === ".." || spec.startsWith("./") || spec.startsWith("../");
-}
 
 export interface RawImport {
   specifier: string;
@@ -73,75 +71,29 @@ export function extractImports(path: string, text: string): RawImport[] {
   return out;
 }
 
-/** Join and normalize POSIX paths. Returns null if the result escapes the repository root. */
-function joinPath(fromDir: string, spec: string): string | null {
-  const parts = fromDir ? fromDir.split("/") : [];
-  for (const seg of spec.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") {
-      if (parts.length === 0) return null;
-      parts.pop();
-    } else {
-      parts.push(seg);
-    }
-  }
-  return parts.join("/");
-}
-
-// Order mirrors TypeScript's resolution: TS sources and declarations before JS.
-const PROBE_EXTENSIONS = [".ts", ".tsx", ".d.ts", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
-// TypeScript's ESM convention: "./x.js" in source refers to "./x.ts".
-const JS_TO_TS: Record<string, string[]> = {
-  ".js": [".ts", ".tsx", ".d.ts"],
-  ".jsx": [".tsx"],
-  ".mjs": [".mts", ".d.mts"],
-  ".cjs": [".cts", ".d.cts"],
-};
-
-/**
- * Resolve a relative specifier against the importing file, using the set of
- * files in the repository. Follows TypeScript-style rules: exact match,
- * .js → .ts mapping, extension probing, then directory index files.
- */
-export function resolveRelative(fromPath: string, spec: string, files: ReadonlySet<string>): string | null {
-  const slash = fromPath.lastIndexOf("/");
-  const base = joinPath(slash === -1 ? "" : fromPath.slice(0, slash), spec);
-  if (base === null) return null;
-
-  const candidates: string[] = [];
-  const jsExt = base.match(/\.(?:js|jsx|mjs|cjs)$/i)?.[0];
-  if (jsExt) {
-    const stem = base.slice(0, -jsExt.length);
-    for (const ext of JS_TO_TS[jsExt.toLowerCase()]) candidates.push(stem + ext);
-  }
-  if (base) candidates.push(base);
-  for (const ext of PROBE_EXTENSIONS) candidates.push(base + ext);
-  for (const ext of PROBE_EXTENSIONS) candidates.push(base ? `${base}/index${ext}` : `index${ext}`);
-
-  for (const c of candidates) if (files.has(c)) return c;
-  return null;
-}
-
 export interface ImportGraph {
   imports: Record<string, ImportRef[]>;
   importedBy: Record<string, string[]>;
   internalEdges: number;
   unresolved: number;
+  /** Specifiers resolved to a file through tsconfig baseUrl/paths. */
+  aliasResolved: number;
 }
 
 /**
  * Parse every source and build both directions of the import index.
- * `allFiles` is every file path in the repository (resolution targets need
- * not be analyzed themselves, e.g. .d.ts, .js or .json files).
+ * Resolution targets need not be analyzed themselves (e.g. .d.ts, .js or
+ * .json files), only present in the repository.
  */
 export function buildImportGraph(
   sources: ReadonlyArray<{ path: string; text: string }>,
-  allFiles: ReadonlySet<string>,
+  resolve: ModuleResolver,
 ): ImportGraph {
   const imports: Record<string, ImportRef[]> = {};
   const importedBySets = new Map<string, Set<string>>();
   let internalEdges = 0;
   let unresolved = 0;
+  let aliasResolved = 0;
 
   for (const { path, text } of sources) {
     const merged = new Map<string, ImportRef>();
@@ -152,11 +104,11 @@ export function buildImportGraph(
         existing.reexport ||= raw.reexport;
         continue;
       }
-      const external = !isRelativeSpecifier(raw.specifier);
+      const { kind, resolved } = resolve(path, raw.specifier);
       merged.set(raw.specifier, {
         specifier: raw.specifier,
-        resolved: external ? null : resolveRelative(path, raw.specifier, allFiles),
-        external,
+        resolved,
+        kind,
         typeOnly: raw.typeOnly,
         reexport: raw.reexport,
         line: raw.line,
@@ -168,8 +120,9 @@ export function buildImportGraph(
 
     const targets = new Set<string>();
     for (const ref of refs) {
+      if (ref.kind === "alias" && ref.resolved) aliasResolved++;
       if (ref.resolved && ref.resolved !== path) targets.add(ref.resolved);
-      else if (!ref.external && !ref.resolved) unresolved++;
+      else if (ref.kind !== "package" && !ref.resolved) unresolved++;
     }
     for (const target of targets) {
       let set = importedBySets.get(target);
@@ -181,5 +134,5 @@ export function buildImportGraph(
 
   const importedBy: Record<string, string[]> = {};
   for (const [target, set] of importedBySets) importedBy[target] = [...set].sort();
-  return { imports, importedBy, internalEdges, unresolved };
+  return { imports, importedBy, internalEdges, unresolved, aliasResolved };
 }

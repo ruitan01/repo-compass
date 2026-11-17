@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { isAnalyzableSource } from "@/lib/analysis/sources";
-import type { ImportAnalysis, ImportRef } from "@/lib/analysis/types";
+import type { AliasConfigSummary, ImportAnalysis, ImportRef } from "@/lib/analysis/types";
 import type { GitHubErrorCode } from "@/lib/github/types";
 import { formatBytes } from "./FileTree";
 import { AlertIcon, ArrowLeftIcon, ExternalIcon, FileIcon, SpinnerIcon } from "./icons";
@@ -89,7 +89,50 @@ function Overview({ analysis, onNavigate }: { analysis: AnalysisState; onNavigat
           ))}
         </Section>
       )}
+      <AliasConfigs configs={data.aliasConfigs} resolved={s.aliasResolved} onNavigate={onNavigate} />
     </div>
+  );
+}
+
+const MAX_PATTERNS_SHOWN = 6;
+
+function AliasConfigs({
+  configs,
+  resolved,
+  onNavigate,
+}: {
+  configs: AliasConfigSummary[];
+  resolved: number;
+  onNavigate: (path: string) => void;
+}) {
+  if (configs.length === 0) return null;
+  return (
+    <Section title="Path aliases">
+      <p className="px-2 pb-1 text-xs text-slate-500">
+        {resolved.toLocaleString()} imports resolved through tsconfig <span className="font-mono">paths</span> /{" "}
+        <span className="font-mono">baseUrl</span>.
+      </p>
+      {configs.map((c) => (
+        <div key={c.path} className="pb-1.5">
+          <FileLink path={c.path} onNavigate={onNavigate} />
+          <ul className="space-y-0.5 pl-8 pr-2 font-mono text-[11px] text-slate-600">
+            {c.baseUrl !== null && (
+              <li className="truncate" title={`baseUrl → ${c.baseUrl || "."}`}>
+                <span className="text-slate-400">baseUrl</span> → {c.baseUrl || "."}
+              </li>
+            )}
+            {c.paths.slice(0, MAX_PATTERNS_SHOWN).map((p) => (
+              <li key={p.pattern} className="truncate" title={`${p.pattern} → ${p.targets.join(", ")}`}>
+                <span className="text-indigo-700">{p.pattern}</span> → {p.targets.join(", ") || "."}
+              </li>
+            ))}
+            {c.paths.length > MAX_PATTERNS_SHOWN && (
+              <li className="text-slate-400">+{c.paths.length - MAX_PATTERNS_SHOWN} more</li>
+            )}
+          </ul>
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -201,7 +244,7 @@ function AnalyzedFile({
           <Empty>
             {data.stats.overLimit > 0
               ? "No analyzed file imports this file. Some files weren't analyzed, so there may be importers that aren't shown."
-              : "No TypeScript file in this repository imports this file with a relative import."}
+              : "No TypeScript file in this repository imports this file."}
           </Empty>
         ) : (
           importers.map((p) => <FileLink key={p} path={p} onNavigate={onNavigate} />)
@@ -221,8 +264,8 @@ function ImportsList({
   onNavigate: (path: string) => void;
 }) {
   const internal = refs.filter((r) => r.resolved);
-  const unresolved = refs.filter((r) => !r.external && !r.resolved);
-  const external = refs.filter((r) => r.external);
+  const unresolved = refs.filter((r) => r.kind !== "package" && !r.resolved);
+  const external = refs.filter((r) => r.kind === "package");
 
   return (
     <>
@@ -245,10 +288,13 @@ function ImportsList({
 
       {unresolved.length > 0 && (
         <Section title="Unresolved" count={unresolved.length}>
-          <p className="px-2 pb-1 text-xs text-slate-500">Relative imports that don&apos;t match a file in the repository.</p>
+          <p className="px-2 pb-1 text-xs text-slate-500">
+            Relative imports or path aliases that don&apos;t match a file in the repository (e.g. generated files).
+          </p>
           {unresolved.map((r) => (
             <div key={r.specifier} className="flex items-center gap-2 px-2 py-1 font-mono text-xs text-slate-700">
               <span className="truncate">{r.specifier}</span>
+              {r.kind === "alias" && <Badge>alias</Badge>}
               <LineLink n={r.line} href={lineUrl(r.line)} />
             </div>
           ))}
@@ -256,7 +302,7 @@ function ImportsList({
       )}
 
       {external.length > 0 && (
-        <Section title="Packages & aliases" count={external.length}>
+        <Section title="Packages" count={external.length}>
           <div className="flex flex-wrap gap-1.5 px-2 pt-0.5">
             {external.map((r) => (
               <a
@@ -272,7 +318,9 @@ function ImportsList({
               </a>
             ))}
           </div>
-          <p className="px-2 pt-2 text-xs text-slate-500">Non-relative imports aren&apos;t resolved yet, including tsconfig path aliases.</p>
+          <p className="px-2 pt-2 text-xs text-slate-500">
+            Imports that aren&apos;t relative and don&apos;t match a tsconfig alias. Workspace packages aren&apos;t resolved yet.
+          </p>
         </Section>
       )}
     </>
@@ -292,6 +340,7 @@ function notAnalyzedReason(data: ImportAnalysis, path: string): string {
 function Badges({ r }: { r: ImportRef }) {
   return (
     <>
+      {r.kind === "alias" && <Badge title={r.specifier}>alias</Badge>}
       {r.typeOnly && <Badge>type</Badge>}
       {r.reexport && <Badge>re-export</Badge>}
     </>
@@ -376,9 +425,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({ children }: { children: ReactNode }) {
+function Badge({ children, title }: { children: ReactNode; title?: string }) {
   return (
-    <span className="shrink-0 rounded border border-slate-200 bg-slate-100 px-1 text-[10px] font-medium text-slate-500">{children}</span>
+    <span title={title} className="shrink-0 rounded border border-slate-200 bg-slate-100 px-1 text-[10px] font-medium text-slate-500">{children}</span>
   );
 }
 

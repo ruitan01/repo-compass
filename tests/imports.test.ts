@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildImportGraph, extractImports, resolveRelative } from "../src/lib/analysis/imports.ts";
+import { buildImportGraph, extractImports } from "../src/lib/analysis/imports.ts";
+import { resolveRelative } from "../src/lib/analysis/resolve.ts";
+import { createModuleResolver } from "../src/lib/analysis/tsconfig.ts";
 import { isAnalyzableSource, sourcePriority } from "../src/lib/analysis/sources.ts";
 
 test("extracts static imports, re-exports and import-equals with lines", () => {
@@ -65,13 +67,13 @@ test("builds imports and importedBy, merging duplicate specifiers", () => {
       { path: "src/index.ts", text: 'import { a } from "./utils";\nimport type { T } from "./utils";\nexport * from "./lib";\nimport x from "react";\nimport "./missing";' },
       { path: "src/lib/index.ts", text: 'import { a } from "../utils";\nimport self from "./index";' },
     ],
-    files,
+    createModuleResolver(files, new Map()).resolve,
   );
   assert.deepEqual(graph.imports["src/index.ts"], [
-    { specifier: "./utils", resolved: "src/utils.ts", external: false, typeOnly: false, reexport: false, line: 1 },
-    { specifier: "./lib", resolved: "src/lib/index.ts", external: false, typeOnly: false, reexport: true, line: 3 },
-    { specifier: "react", resolved: null, external: true, typeOnly: false, reexport: false, line: 4 },
-    { specifier: "./missing", resolved: null, external: false, typeOnly: false, reexport: false, line: 5 },
+    { specifier: "./utils", resolved: "src/utils.ts", kind: "relative", typeOnly: false, reexport: false, line: 1 },
+    { specifier: "./lib", resolved: "src/lib/index.ts", kind: "relative", typeOnly: false, reexport: true, line: 3 },
+    { specifier: "react", resolved: null, kind: "package", typeOnly: false, reexport: false, line: 4 },
+    { specifier: "./missing", resolved: null, kind: "relative", typeOnly: false, reexport: false, line: 5 },
   ]);
   assert.deepEqual(graph.importedBy, {
     "src/utils.ts": ["src/index.ts", "src/lib/index.ts"],
@@ -79,6 +81,7 @@ test("builds imports and importedBy, merging duplicate specifiers", () => {
   });
   assert.equal(graph.internalEdges, 3); // self-import excluded
   assert.equal(graph.unresolved, 1);
+  assert.equal(graph.aliasResolved, 0);
 });
 
 test("selects and prioritizes source files", () => {
