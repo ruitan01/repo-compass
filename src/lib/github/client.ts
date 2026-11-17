@@ -1,8 +1,10 @@
 import "server-only";
 
+import { HOUR, MINUTE, PromiseCache } from "../cache";
 import type { GitHubErrorCode, RepoRef, RepoSummary, RepoTree, TreeEntry } from "./types";
 
 const API_BASE = "https://api.github.com";
+const RAW_BASE = "https://raw.githubusercontent.com";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export class GitHubError extends Error {
@@ -17,9 +19,15 @@ export class GitHubError extends Error {
   }
 }
 
-function headers(): HeadersInit {
+// Repository metadata and branch heads can change, so they're cached briefly.
+// Trees are addressed by commit SHA and never change, so they're kept longer.
+const summaryCache = new PromiseCache<RepoSummary>(200);
+const headCache = new PromiseCache<string | null>(200);
+const treeCache = new PromiseCache<Omit<RepoTree, "repo" | "ref">>(30);
+
+function headers(accept = "application/vnd.github+json"): HeadersInit {
   const h: Record<string, string> = {
-    Accept: "application/vnd.github+json",
+    Accept: accept,
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "repo-compass",
   };
@@ -29,14 +37,9 @@ function headers(): HeadersInit {
   return h;
 }
 
-/** Low-level GET against the GitHub REST API with error mapping. */
-async function githubGet<T>(path: string, repo: RepoRef): Promise<{ status: number; body: T }> {
-  let res: Response;
+async function send(url: string, init: RequestInit): Promise<Response> {
   try {
-    res = await fetch(`${API_BASE}${path}`, {
-      headers: headers(),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (err) {
     const timedOut = err instanceof DOMException && err.name === "TimeoutError";
     throw new GitHubError(
@@ -45,11 +48,16 @@ async function githubGet<T>(path: string, repo: RepoRef): Promise<{ status: numb
       502,
     );
   }
+}
 
-  if (res.ok) return { status: res.status, body: (await res.json()) as T };
-
-  // 409 on the trees endpoint means "Git Repository is empty" — callers handle it.
-  if (res.status === 409) return { status: 409, body: undefined as T };
+/**
+ * Low-level GET against the GitHub REST API with error mapping.
+ * Returns `null` for HTTP 409, which GitHub uses for "Git Repository is empty".
+ */
+async function githubGet(path: string, repo: RepoRef, accept?: string): Promise<Response | null> {
+  const res = await send(`${API_BASE}${path}`, { headers: headers(accept) });
+  if (res.ok) return res;
+  if (res.status === 409) return null;
 
   const fullName = `${repo.owner}/${repo.name}`;
   const remaining = res.headers.get("x-ratelimit-remaining");
@@ -74,6 +82,9 @@ async function githubGet<T>(path: string, repo: RepoRef): Promise<{ status: numb
   throw new GitHubError("upstream_error", `GitHub returned an unexpected error (HTTP ${res.status}).`, 502);
 }
 
+const repoPath = (r: RepoRef) => `/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}`;
+const cacheKey = (r: RepoRef) => `${r.owner}/${r.name}`.toLowerCase();
+
 interface GitHubRepoResponse {
   name: string;
   full_name: string;
@@ -90,50 +101,79 @@ interface GitHubTreeResponse {
   tree: Array<{ path: string; type: "blob" | "tree" | "commit"; size?: number }>;
 }
 
-export async function getRepoSummary(repo: RepoRef): Promise<RepoSummary> {
-  const { body } = await githubGet<GitHubRepoResponse>(
-    `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`,
-    repo,
-  );
-  return {
-    owner: body.owner.login,
-    name: body.name,
-    fullName: body.full_name,
-    description: body.description,
-    htmlUrl: body.html_url,
-    defaultBranch: body.default_branch,
-    stars: body.stargazers_count,
-  };
+export function getRepoSummary(repo: RepoRef): Promise<RepoSummary> {
+  return summaryCache.getOrCreate(cacheKey(repo), 5 * MINUTE, async () => {
+    const res = await githubGet(repoPath(repo), repo);
+    if (!res) throw new GitHubError("upstream_error", "GitHub returned an unexpected response.", 502);
+    const body = (await res.json()) as GitHubRepoResponse;
+    return {
+      owner: body.owner.login,
+      name: body.name,
+      fullName: body.full_name,
+      description: body.description,
+      htmlUrl: body.html_url,
+      defaultBranch: body.default_branch,
+      stars: body.stargazers_count,
+    };
+  });
+}
+
+/** Resolve a branch to its current commit SHA, or null if the repository is empty. */
+function getHeadCommit(repo: RepoRef, branch: string): Promise<string | null> {
+  return headCache.getOrCreate(`${cacheKey(repo)}#${branch}`, MINUTE, async () => {
+    const ref = branch.split("/").map(encodeURIComponent).join("/");
+    const res = await githubGet(`${repoPath(repo)}/commits/${ref}`, repo, "application/vnd.github.sha");
+    return res ? (await res.text()).trim() : null;
+  });
 }
 
 const TYPE_MAP = { blob: "file", tree: "dir", commit: "submodule" } as const;
 
+/** Fetch the recursive file tree at a specific commit. Cached by commit SHA. */
+export function getTreeAtCommit(repo: RepoRef, commit: string): Promise<Omit<RepoTree, "repo" | "ref">> {
+  return treeCache.getOrCreate(`${cacheKey(repo)}@${commit}`, 6 * HOUR, async () => {
+    const res = await githubGet(`${repoPath(repo)}/git/trees/${commit}?recursive=1`, repo);
+    if (!res) return { commit, entries: [], truncated: false };
+    const body = (await res.json()) as GitHubTreeResponse;
+    const entries: TreeEntry[] = body.tree.map((item) => ({
+      path: item.path,
+      type: TYPE_MAP[item.type],
+      ...(item.type === "blob" && item.size !== undefined ? { size: item.size } : {}),
+    }));
+    return { commit, entries, truncated: body.truncated };
+  });
+}
+
 /**
  * Fetch the full recursive file tree of a public repository's default branch.
- * Uses two API calls: repository metadata (for the default branch) and the
- * recursive git tree.
+ * Cold cost: 3 GitHub API calls (metadata, branch head, tree).
  */
 export async function getRepoTree(repo: RepoRef): Promise<RepoTree> {
   const summary = await getRepoSummary(repo);
   const ref = summary.defaultBranch;
-  // Branch names may contain '/', which the trees endpoint accepts unencoded.
-  const refPath = ref.split("/").map(encodeURIComponent).join("/");
+  const commit = await getHeadCommit(summary, ref);
+  if (!commit) return { repo: summary, ref, commit: "", entries: [], truncated: false };
+  const tree = await getTreeAtCommit(summary, commit);
+  return { repo: summary, ref, ...tree };
+}
 
-  const { status, body } = await githubGet<GitHubTreeResponse>(
-    `/repos/${encodeURIComponent(summary.owner)}/${encodeURIComponent(summary.name)}/git/trees/${refPath}?recursive=1`,
-    repo,
-  );
-
-  if (status === 409) {
-    // Empty repository: no commits, so no tree.
-    return { repo: summary, ref, sha: "", entries: [], truncated: false };
+/**
+ * Fetch a file's text at a commit from raw.githubusercontent.com. This does
+ * not count against the REST API rate limit. Returns null on any failure so
+ * callers can skip the file.
+ */
+export async function getFileText(repo: RepoRef, commit: string, path: string): Promise<string | null> {
+  const url = `${RAW_BASE}/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/${commit}/${path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "repo-compass" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
   }
-
-  const entries: TreeEntry[] = body.tree.map((item) => ({
-    path: item.path,
-    type: TYPE_MAP[item.type],
-    ...(item.type === "blob" && item.size !== undefined ? { size: item.size } : {}),
-  }));
-
-  return { repo: summary, ref, sha: body.sha, entries, truncated: body.truncated };
 }

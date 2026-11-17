@@ -32,8 +32,8 @@ export interface RepoTree {
   repo: RepoSummary;
   /** Ref the tree was read from (the default branch). */
   ref: string;
-  /** Commit SHA of the tree's root. */
-  sha: string;
+  /** Commit SHA the tree was read at (empty string for an empty repository). */
+  commit: string;
   entries: TreeEntry[];
   /** GitHub caps recursive trees (~100k entries / 7 MB); true if this one was cut short. */
   truncated: boolean;

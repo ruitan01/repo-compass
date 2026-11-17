@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
-import { buildFileTree } from "@/lib/file-tree";
+import { useRef, useState, type FormEvent } from "react";
 import { parseRepoInput } from "@/lib/github/parse";
 import type { GitHubErrorCode, RepoTree, RepoTreeResponse } from "@/lib/github/types";
-import { FileTree } from "./FileTree";
-import { AlertIcon, BranchIcon, FolderIcon, GitHubIcon, SpinnerIcon, StarIcon } from "./icons";
+import { AlertIcon, GitHubIcon, SpinnerIcon } from "./icons";
+import { RepoWorkspace } from "./RepoWorkspace";
 
 type State =
   | { status: "idle" }
@@ -122,7 +121,7 @@ export function RepoExplorer() {
         </div>
       </form>
 
-      <section aria-live="polite" className="mx-auto mt-10 w-full max-w-4xl">
+      <section aria-live="polite" className="mx-auto mt-10 w-full max-w-6xl">
         {state.status === "loading" && <LoadingState label={state.label} />}
         {state.status === "error" && (
           <ErrorState
@@ -131,7 +130,9 @@ export function RepoExplorer() {
             onRetry={state.code === "invalid_input" ? undefined : () => void load(input)}
           />
         )}
-        {state.status === "success" && <RepoResult data={state.data} />}
+        {state.status === "success" && (
+          <RepoWorkspace key={`${state.data.repo.fullName}@${state.data.commit}`} data={state.data} />
+        )}
       </section>
     </div>
   );
@@ -174,69 +175,5 @@ function ErrorState({ code, message, onRetry }: { code: GitHubErrorCode; message
         </button>
       )}
     </div>
-  );
-}
-
-function RepoResult({ data }: { data: RepoTree }) {
-  const { root, stats } = useMemo(() => buildFileTree(data.entries), [data.entries]);
-  const { repo } = data;
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50">
-      <header className="border-b border-slate-200 px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <a
-              href={repo.htmlUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-lg font-semibold text-slate-900 hover:underline"
-            >
-              {repo.fullName}
-            </a>
-            {repo.description && <p className="mt-1 text-sm text-slate-600">{repo.description}</p>}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <Pill>
-              <BranchIcon width={13} height={13} /> {data.ref}
-            </Pill>
-            <Pill>
-              <StarIcon width={13} height={13} /> {repo.stars.toLocaleString()}
-            </Pill>
-            {data.entries.length > 0 && (
-              <Pill>
-                {stats.files.toLocaleString()} files · {stats.dirs.toLocaleString()} folders
-              </Pill>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {data.truncated && (
-        <div className="border-b border-amber-200 bg-amber-50 px-5 py-2.5 text-sm text-amber-900">
-          This repository is very large, so GitHub returned only part of its file tree. Some files are not shown.
-        </div>
-      )}
-
-      {data.entries.length === 0 ? (
-        <div className="flex flex-col items-center px-6 py-14 text-center">
-          <FolderIcon className="text-slate-300" width={36} height={36} />
-          <p className="mt-3 font-medium text-slate-800">This repository is empty</p>
-          <p className="mt-1 text-sm text-slate-500">
-            There are no files on the <span className="font-mono">{data.ref}</span> branch yet.
-          </p>
-        </div>
-      ) : (
-        <FileTree key={`${repo.fullName}@${data.sha}`} nodes={root} />
-      )}
-    </div>
-  );
-}
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
-      {children}
-    </span>
   );
 }
