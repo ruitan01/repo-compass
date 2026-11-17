@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background:
+    radial-gradient(60rem 30rem at 50% -10rem, rgb(226 232 240 / 0.7), transparent 70%),
+    #f8fafc;
+  color: #0f172a;
+}
