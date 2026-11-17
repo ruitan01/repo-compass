@@ -2,7 +2,16 @@
 
 A visual codebase onboarding tool that helps students and junior developers understand unfamiliar GitHub repositories. Built for MPCS 51238 (Design, Build, Ship).
 
-> **Status: Stage 3B.** Paste a public GitHub repository, browse its file tree, and click any file to see what it imports and what imports it, as a list and as an interactive dependency graph. Imports through tsconfig path aliases (e.g. `@/*`) and `baseUrl` are resolved. Accounts (Clerk), persistence (Supabase), and AI features are not built yet.
+> **Status: v1.** Accounts, saved repositories and AI features are not part of v1.
+
+## Features
+
+- **Any public repository:** paste a GitHub URL (`https://github.com/owner/repo`, `owner/repo`, SSH or `.git` URLs) or pick an example.
+- **File tree** of the default branch, pinned to the exact commit, with file sizes and expand/collapse all.
+- **Import analysis** of TypeScript files (`.ts`, `.tsx`, `.mts`, `.cts`): for every file, what it imports (with line links to GitHub), what imports it, unresolved imports and npm packages. Relative imports and tsconfig path aliases (`@/*`, `baseUrl`, `extends`, monorepo configs) are resolved.
+- **Interactive dependency graph** centered on the selected file: importers on the left, imports on the right, with type-only and two-way (cycle) dependencies marked. Click a node to move through the codebase; zoom and pan with drag, scroll or keyboard.
+- **One shared selection** across the tree, graph and side panel, with Back history.
+- Clear loading, empty, error, rate-limit and "unsupported repository" states.
 
 The original project proposal page is kept at [`index.html`](./index.html).
 
@@ -15,7 +24,7 @@ The original project proposal page is kept at [`index.html`](./index.html).
 
 ## Getting started
 
-Requirements: Node.js 20.9+ (developed on Node 24) and npm.
+Requirements: Node.js 20.9+ (developed on Node 24; `npm test` uses Node's built-in TypeScript support, which needs Node 22.18+) and npm.
 
 ```bash
 npm install
@@ -95,7 +104,7 @@ Repositories with no TypeScript sources get an "unsupported" result, and the tre
 The graph is centered on the selected file: the files that import it on the left, the files it imports on the right. It's built in the browser from the same `/api/repo/imports` response as the side panel; there's no extra request.
 
 - **Synchronized selection:** clicking a node makes it the new center, selects it in the file tree (expanding its folders) and updates the side panel. Selecting in the tree or panel updates the graph, and Back works across all three.
-- **Zoom and pan:** drag to pan (also when starting on a node), scroll or pinch to zoom around the cursor, or use the −, + and Fit buttons. With the canvas focused, `+`/`-` zoom, `0` fits, and the arrow keys pan.
+- **Zoom and pan:** drag to pan (also when starting on a node). Ctrl/⌘ + scroll or a trackpad pinch zooms around the cursor; plain scrolling zooms only once the graph has focus (after clicking it), so scrolling the page past the graph isn't hijacked. The −, + and Fit buttons work too, and with the graph focused `+`/`-` zoom, `0` fits and the arrow keys pan.
 - **Readable by default:** each side wraps into columns of up to 12 files. After 24 files a side shows a "+N more · Show all" node. The initial view doesn't zoom out below 65%; Fit shows everything.
 - **Edge styles:** green = imports the selected file, indigo = imported by it, amber two-way = both (a cycle, listed first so it's never hidden), dashed = type-only. Nodes are labeled `alias` or `type`; gray file icons mark files whose own imports weren't analyzed (e.g. `.css`, `.json`, `.js`).
 - Layout and viewport math live in `src/lib/graph/focus-graph.ts` (pure, unit-tested). Rendering is plain HTML nodes over an SVG edge layer, with no graph library.
@@ -178,10 +187,43 @@ tests/                        Unit tests (parsing, tree building, import analysi
 
 All GitHub access lives in `src/lib/github/`. `client.ts` and `analysis/analyze.ts` import `server-only`, so the build fails if either is ever imported into client code. The TypeScript compiler is never shipped to the browser.
 
+## Deploying to Vercel
+
+The app is a standard Next.js project with no database and only one optional environment variable, so Vercel's defaults work. The import analysis route sets `maxDuration = 60` seconds, which is within every Vercel plan's limits.
+
+**Set `GITHUB_TOKEN` in production.** Without it, GitHub allows 60 requests per hour per IP, and Vercel functions share outbound IPs, so a public deployment will hit "GitHub rate limit reached" quickly. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with **Public repositories (read-only)** access and no extra permissions.
+
+### Option A: Vercel dashboard (Git integration)
+
+1. Push the code: `git push origin main`.
+2. Go to [vercel.com/new](https://vercel.com/new), sign in with GitHub, and import the `repo-compass` repository. Vercel detects Next.js; keep the default build command (`next build`), output settings and root directory.
+3. Under **Environment Variables**, add `GITHUB_TOKEN` with your token (Production, and Preview if you want previews to work too).
+4. Click **Deploy**. Later pushes to `main` redeploy automatically.
+
+### Option B: Vercel CLI
+
+```bash
+npm i -g vercel
+vercel login
+vercel link                       # create or link the project
+vercel env add GITHUB_TOKEN production
+vercel --prod                     # build and deploy, prints the live URL
+```
+
+### Verify the deployment
+
+1. Open the live URL and enter `vercel/swr`. The file tree should load, followed by the import analysis ("Files analyzed 193 / 193").
+2. Click a file, then a node in the graph: the tree and side panel should follow.
+3. `https://<your-app>/api/repo/tree?repo=vercel/swr` should return `{"ok":true,...}`.
+
+If you see "GitHub rate limit reached", `GITHUB_TOKEN` is missing or wasn't applied: environment variable changes need a redeploy. "GitHub authentication failed" means the token is invalid or expired.
+
 ## Known limitations
 
 - Public repositories only, and only the default branch.
+- Only TypeScript sources are parsed. JavaScript-only repositories show the file tree with an "unsupported" note. Dynamic `import()`, `require()` calls and workspace packages aren't resolved (see [Module resolution](#module-resolution)).
+- At most 800 files are analyzed per repository (256 KB per file, 12 MB total); larger repositories get a partial analysis, which the UI points out.
 - GitHub truncates recursive trees for very large repositories (e.g. `torvalds/linux`). The UI shows a warning when that happens.
 - Import analysis covers TypeScript files and relative + tsconfig-alias imports (see above). Large repositories are analyzed only partially, and the panel says so.
-- The cache is in memory and per server instance.
+- The cache is in memory and per server instance; on Vercel each function instance starts cold, so the first analysis of a repository takes a few seconds.
 - The graph shows direct neighbors only (one hop in each direction).

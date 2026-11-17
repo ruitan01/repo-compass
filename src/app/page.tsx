@@ -17,8 +17,8 @@ export default function Home() {
             Find your way around any codebase
           </h1>
           <p className="mt-4 text-lg text-slate-600 text-pretty">
-            Paste a public GitHub repository to see how it&apos;s organized — a clear starting point for reading
-            unfamiliar code.
+            Paste a public GitHub repository to browse its files and see how its TypeScript modules depend on each
+            other — a clear starting point for reading unfamiliar code.
           </p>
         </div>
 

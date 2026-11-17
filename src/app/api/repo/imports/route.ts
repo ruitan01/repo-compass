@@ -4,6 +4,9 @@ import { GitHubError, getRepoTree, parseRepoInput } from "@/lib/github";
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
 
+/** Large repositories download up to 800 files; allow more than the default function timeout. */
+export const maxDuration = 60;
+
 /**
  * GET /api/repo/imports?repo=<owner/name or URL>[&commit=<sha>]
  * Static import analysis of a repository's TypeScript files. Pass the commit

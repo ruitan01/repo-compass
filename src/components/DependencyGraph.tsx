@@ -59,6 +59,12 @@ function GraphView({ data, focus, onNavigate }: { data: ImportAnalysis; focus: s
   const neighbors = useMemo(() => collectNeighbors(data, focus), [data, focus]);
   const layout = useMemo(() => layoutFocusGraph(focus, neighbors, { expanded }), [focus, neighbors, expanded]);
   const { viewport, containerRef, animating, fit, zoomBy, wasDrag } = usePanZoom(layout);
+  // The clicked node becomes the center (and its button disappears), so keep
+  // focus on the canvas rather than losing it to the page.
+  const navigateFromGraph = (path: string) => {
+    containerRef.current?.focus({ preventScroll: true });
+    onNavigate(path);
+  };
   const hovered = hoverState && layout.edges.some((e) => e.path === hoverState) ? hoverState : null;
 
   const empty = neighbors.importers.length === 0 && neighbors.imports.length === 0;
@@ -108,7 +114,7 @@ function GraphView({ data, focus, onNavigate }: { data: ImportAnalysis; focus: s
               neighborCounts={node.kind === "focus" ? { in: neighbors.importers.length, out: neighbors.imports.length } : undefined}
               hovered={hovered}
               onHover={setHovered}
-              onNavigate={onNavigate}
+              onNavigate={navigateFromGraph}
               onExpand={(side) => setExpansion({ focus, sides: new Set(expanded).add(side) })}
             />
           ))}
@@ -327,6 +333,7 @@ function Toolbar({
     <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 text-xs">
       <span className="flex items-center gap-1.5 pl-1 font-medium text-slate-700">
         <GraphIcon className="text-slate-400" width={14} height={14} /> Dependency graph
+        <span className="ml-2 hidden font-normal text-slate-400 md:inline xl:hidden 2xl:inline">Drag to pan · Ctrl + scroll to zoom</span>
       </span>
       <div className="flex items-center gap-0.5">
         <ToolButton label="Zoom out" onClick={onZoomOut} disabled={disabled}>
@@ -508,8 +515,8 @@ const DRAG_THRESHOLD = 4;
 const KEY_PAN = 60;
 
 /**
- * Pan (pointer drag, arrow keys) and zoom (wheel / pinch on trackpads,
- * +/- keys) for a graph container. The view is refit whenever the layout
+ * Pan (pointer drag, arrow keys) and zoom (Ctrl/⌘ + wheel, pinch, plain
+ * wheel once the graph has focus, +/- keys) for a graph container. The view is refit whenever the layout
  * changes, and on resize until the user moves the view themselves.
  */
 function usePanZoom(layout: FocusLayout) {
@@ -570,6 +577,10 @@ function usePanZoom(layout: FocusLayout) {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // Plain scrolling only zooms once the graph has focus (after a click or
+      // Tab), so scrolling the page past the graph isn't hijacked. Ctrl/⌘ +
+      // scroll and trackpad pinch (reported as ctrlKey) always zoom.
+      if (!e.ctrlKey && !e.metaKey && !el.contains(document.activeElement)) return;
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const delta = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1);

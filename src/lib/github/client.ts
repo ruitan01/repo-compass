@@ -77,7 +77,7 @@ async function githubGet(path: string, repo: RepoRef, accept?: string): Promise<
     throw new GitHubError("rate_limited", `GitHub API rate limit reached.${when}`, 429);
   }
   if (res.status === 401) {
-    throw new GitHubError("unauthorized", "The server's GitHub token was rejected. Check GITHUB_TOKEN.", 502);
+    throw new GitHubError("unauthorized", "Repo Compass's GitHub token was rejected by GitHub. If you run this deployment, check the GITHUB_TOKEN environment variable.", 502);
   }
   throw new GitHubError("upstream_error", `GitHub returned an unexpected error (HTTP ${res.status}).`, 502);
 }
