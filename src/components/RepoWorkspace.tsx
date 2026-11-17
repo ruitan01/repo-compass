@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ImportAnalysisResponse } from "@/lib/analysis/types";
 import { buildFileTree, type FileNode } from "@/lib/file-tree";
 import type { RepoTree } from "@/lib/github/types";
+import { DependencyGraph } from "./DependencyGraph";
 import { FileTree } from "./FileTree";
 import { ImportPanel, type AnalysisState } from "./ImportPanel";
 import { BranchIcon, FolderIcon, StarIcon } from "./icons";
 
 /**
- * The result view for one repository at one commit: header, file tree and
- * import side panel. Mount it with a key of repo@commit so state resets
+ * The result view for one repository at one commit: header, file tree,
+ * dependency graph and import side panel, all sharing one selection. Mount it with a key of repo@commit so state resets
  * when a different repository is loaded.
  */
 export function RepoWorkspace({ data }: { data: RepoTree }) {
@@ -98,7 +99,12 @@ export function RepoWorkspace({ data }: { data: RepoTree }) {
           </p>
         </div>
       ) : (
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)]">
+        // Below xl the graph spans the full width above the tree and panel;
+        // from xl up the three sit side by side.
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] xl:grid-cols-[17rem_minmax(0,1fr)_22rem]">
+          <div className="order-first border-b border-slate-200 lg:col-span-2 xl:order-none xl:col-span-1 xl:col-start-2 xl:row-start-1 xl:border-b-0 xl:border-l">
+            <DependencyGraph analysis={analysis.state} selectedPath={selected} onNavigate={navigate} />
+          </div>
           <FileTree
             nodes={root}
             expanded={expanded}

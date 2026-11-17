@@ -121,3 +121,39 @@ export function ExternalIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function PlusIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+export function MinusIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+export function FitIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+    </svg>
+  );
+}
+
+export function GraphIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="4.5" cy="6" r="2" />
+      <circle cx="4.5" cy="18" r="2" />
+      <circle cx="19.5" cy="12" r="2" />
+      <path d="m6.4 7.1 3.4 3.3M6.4 16.9l3.4-3.3M14.5 12h3" />
+    </svg>
+  );
+}

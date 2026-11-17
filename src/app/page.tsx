@@ -4,7 +4,7 @@ import { CompassIcon } from "@/components/icons";
 export default function Home() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
+      <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2 text-slate-900">
           <CompassIcon width={22} height={22} />
           <span className="text-[15px] font-semibold tracking-tight">Repo Compass</span>

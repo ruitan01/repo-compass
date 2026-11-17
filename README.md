@@ -2,7 +2,7 @@
 
 A visual codebase onboarding tool that helps students and junior developers understand unfamiliar GitHub repositories. Built for MPCS 51238 (Design, Build, Ship).
 
-> **Status: Stage 3A.** Paste a public GitHub repository, browse its file tree, and click any file to see what it imports and what imports it. Imports through tsconfig path aliases (e.g. `@/*`) and `baseUrl` are resolved. The visual dependency graph, accounts (Clerk), persistence (Supabase), and AI features are not built yet.
+> **Status: Stage 3B.** Paste a public GitHub repository, browse its file tree, and click any file to see what it imports and what imports it, as a list and as an interactive dependency graph. Imports through tsconfig path aliases (e.g. `@/*`) and `baseUrl` are resolved. Accounts (Clerk), persistence (Supabase), and AI features are not built yet.
 
 The original project proposal page is kept at [`index.html`](./index.html).
 
@@ -90,6 +90,16 @@ Repositories with no TypeScript sources get an "unsupported" result, and the tre
 - `package.json` `imports` (`#subpath`).
 - Dynamic `import()` / `require()` calls, and JavaScript sources.
 
+### Dependency graph
+
+The graph is centered on the selected file: the files that import it on the left, the files it imports on the right. It's built in the browser from the same `/api/repo/imports` response as the side panel; there's no extra request.
+
+- **Synchronized selection:** clicking a node makes it the new center, selects it in the file tree (expanding its folders) and updates the side panel. Selecting in the tree or panel updates the graph, and Back works across all three.
+- **Zoom and pan:** drag to pan (also when starting on a node), scroll or pinch to zoom around the cursor, or use the −, + and Fit buttons. With the canvas focused, `+`/`-` zoom, `0` fits, and the arrow keys pan.
+- **Readable by default:** each side wraps into columns of up to 12 files. After 24 files a side shows a "+N more · Show all" node. The initial view doesn't zoom out below 65%; Fit shows everything.
+- **Edge styles:** green = imports the selected file, indigo = imported by it, amber two-way = both (a cycle, listed first so it's never hidden), dashed = type-only. Nodes are labeled `alias` or `type`; gray file icons mark files whose own imports weren't analyzed (e.g. `.css`, `.json`, `.js`).
+- Layout and viewport math live in `src/lib/graph/focus-graph.ts` (pure, unit-tested). Rendering is plain HTML nodes over an SVG edge layer, with no graph library.
+
 ### Caching
 
 `src/lib/cache.ts` is a small in-memory LRU cache of promises. Concurrent requests share one fetch, and failed requests are never cached. Commit-addressed data (trees, analysis results) is cached for hours because it never changes. Repository metadata and branch heads are cached for 1–5 minutes. The cache is per server instance and resets on restart.
@@ -142,8 +152,9 @@ src/
     api/repo/imports/route.ts GET import analysis (thin wrapper around lib/analysis)
   components/
     RepoExplorer.tsx          Input form + loading / error states
-    RepoWorkspace.tsx         Result view: header, tree, side panel, selection + back history
+    RepoWorkspace.tsx         Result view: header, tree, graph, side panel, shared selection + back history
     FileTree.tsx              Collapsible, selectable file tree (controlled)
+    DependencyGraph.tsx       Interactive graph around the selected file (zoom, pan, click to navigate)
     ImportPanel.tsx           Imports / importers side panel with navigation
     icons.tsx
   lib/
@@ -160,8 +171,9 @@ src/
       parse.ts                URL / owner-name parsing (shared by client and server)
       types.ts                Shared types and the API response shape
       index.ts                Server entry point
+    graph/focus-graph.ts      Pure: neighbors of a file, graph layout, pan/zoom math
     file-tree.ts              Flat path list → nested sorted tree
-tests/                        Unit tests (parsing, tree building, import analysis, path aliases, cache)
+tests/                        Unit tests (parsing, tree building, import analysis, path aliases, graph layout, cache)
 ```
 
 All GitHub access lives in `src/lib/github/`. `client.ts` and `analysis/analyze.ts` import `server-only`, so the build fails if either is ever imported into client code. The TypeScript compiler is never shipped to the browser.
@@ -172,3 +184,4 @@ All GitHub access lives in `src/lib/github/`. `client.ts` and `analysis/analyze.
 - GitHub truncates recursive trees for very large repositories (e.g. `torvalds/linux`). The UI shows a warning when that happens.
 - Import analysis covers TypeScript files and relative + tsconfig-alias imports (see above). Large repositories are analyzed only partially, and the panel says so.
 - The cache is in memory and per server instance.
+- The graph shows direct neighbors only (one hop in each direction).

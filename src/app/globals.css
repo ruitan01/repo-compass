@@ -11,3 +11,13 @@ body {
     #f8fafc;
   color: #0f172a;
 }
+
+@theme {
+  --animate-fade-in: fade-in 280ms ease-out both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+}

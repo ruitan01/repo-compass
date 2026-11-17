@@ -121,7 +121,7 @@ export function RepoExplorer() {
         </div>
       </form>
 
-      <section aria-live="polite" className="mx-auto mt-10 w-full max-w-6xl">
+      <section aria-live="polite" className="mx-auto mt-10 w-full max-w-7xl">
         {state.status === "loading" && <LoadingState label={state.label} />}
         {state.status === "error" && (
           <ErrorState

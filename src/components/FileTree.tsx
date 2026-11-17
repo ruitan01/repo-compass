@@ -25,17 +25,24 @@ export function FileTree({
 }: FileTreeProps) {
   const listRef = useRef<HTMLUListElement>(null);
 
-  // Keep the selected file visible, e.g. after navigating from the side panel.
+  // Keep the selected file visible, e.g. after navigating from the graph or
+  // side panel. Only the list scrolls, never the page (scrollIntoView would
+  // also scroll the window when the tree is off screen).
   useEffect(() => {
-    if (!selectedPath) return;
-    const el = listRef.current?.querySelector(`[data-path="${CSS.escape(selectedPath)}"]`);
-    el?.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    if (!selectedPath || !list) return;
+    const el = list.querySelector(`[data-path="${CSS.escape(selectedPath)}"]`);
+    if (!el) return;
+    const box = list.getBoundingClientRect();
+    const row = el.getBoundingClientRect();
+    if (row.top < box.top) list.scrollTop -= box.top - row.top + 8;
+    else if (row.bottom > box.bottom) list.scrollTop += row.bottom - box.bottom + 8;
   }, [selectedPath, expanded]);
 
   return (
     <div className="flex min-h-0 flex-col">
       <div className="flex items-center justify-between gap-1 border-b border-slate-200 px-3 py-2 text-xs">
-        <span className="pl-1 text-slate-500">Select a file to see its imports</span>
+        <span className="pl-1 text-slate-500"><span className="xl:hidden">Select a file to see its imports</span><span className="hidden font-medium text-slate-700 xl:inline">Files</span></span>
         <div className="flex gap-1">
           <button
             type="button"
